@@ -326,7 +326,7 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_comm_to_eeprom(&self, comm_sel: u8) -> u8 {
-        if comm_sel > 2 {
+        if comm_sel > 2 || comm_sel < 0 {
             return LCDS_ERR_ARG_COMM_RANGE;
         }
         let cmd = &[ESC, BRACKET, comm_sel + b'0', COMM_MODE_SAVE_CMD];
@@ -410,10 +410,10 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn disp_user_char(&self, char_pos: &[u8], char_number: u8, idx_row: u8, idx_col: u8) -> u8 {
-        if idx_row > 2 {
+        if idx_row > 2 || idx_row < 0 {
             return LCDS_ERR_ARG_ROW_RANGE;
         }
-        if idx_col > 39 {
+        if idx_col > 39 || idx_col < 0 {
             return LCDS_ERR_ARG_COL_RANGE;
         }
         self.set_pos(idx_row, idx_col);
