@@ -85,14 +85,15 @@ impl LCDS {
     }
 
     fn send_bytes(&self, bytes: &[u8], context: &str) {
-        if let Some(spi) = self.spi_module.as_ref() {
-            if let Err(e) = spi.write(bytes) {
-                error!("SPI write failed in {}: {:?}", context, e);
-            } else {
-                info!("{} command sent: {:?}", context, bytes);
+        match self.spi_module.as_ref() {
+            Some(spi) => {
+                if let Err(e) = spi.write(bytes) {
+                    error!("SPI write failed in {}: {:?}", context, e);
+                } else {
+                    info!("{} command sent: {:?}", context, bytes);
+                }
             }
-        } else {
-            error!("SPI module not initialized in {}", context);
+            None => error!("SPI module not initialized in {}", context),
         }
     } 
 
@@ -102,19 +103,13 @@ impl LCDS {
     /// * `set_display` - If true, turns the display on; otherwise, off.
     /// * `set_bckl` - If true, turns the backlight on; otherwise, off.
     pub fn display_set(&self, set_display: bool, set_bckl: bool) {
-        let disp_bckl_off = &[ESC, BRACKET, b'0', DISP_EN_CMD];
-        let disp_on_bckl = &[ESC, BRACKET, b'1', DISP_EN_CMD];
-        let disp_bckl_on = &[ESC, BRACKET, b'2', DISP_EN_CMD];
-        let disp_on_bckl_on = &[ESC, BRACKET, b'3', DISP_EN_CMD];
-
-        let msg = match (sest_display, set_bckl) {
-            (false, false) => disp_bckl_off,
-            (true, false) => disp_on_bckl,
-            (false, true) => disp_bckl_on,
-            (true, true) => disp_on_bckl_on
-        };        
-
-        self.send_bytes(cmd, "display_set");
+        let msg = match (set_display, set_bckl) {
+            (false, false) => [ESC, BRACKET, b'0', DISP_EN_CMD],
+            (true, false) => [ESC, BRACKET, b'1', DISP_EN_CMD],
+            (false, true) => [ESC, BRACKET, b'2', DISP_EN_CMD],
+            (true, true) => [ESC, BRACKET, b'3', DISP_EN_CMD],
+        };
+        self.send_bytes(&msg, "display_set");
     }
 
     /// Sets the cursor and blink mode.
@@ -123,17 +118,12 @@ impl LCDS {
     /// * `set_cursor` - If true, shows the cursor; otherwise, hides it.
     /// * `set_blink` - If true, enables cursor blinking; otherwise, disables it.
     pub fn cursor_mode_set(&self, set_cursor: bool, set_blink: bool) {
-        let cursor_off = &[ESC, BRACKET, b'0', CURSOR_MODE_CMD];
-        let cursor_on_blink_off = &[ESC, BRACKET, b'1', CURSOR_MODE_CMD];
-        let cursor_blink_on = &[ESC, BRACKET, b'2', CURSOR_MODE_CMD];
-
         let msg = match (set_cursor, set_blink) {
-            (false, _) => cursor_off,
-            (true, false) => cursor_on_blink_off,
-            _ => cursor_blink_on
+            (false, _) => [ESC, BRACKET, b'0', CURSOR_MODE_CMD],
+            (true, false) => [ESC, BRACKET, b'1', CURSOR_MODE_CMD],
+            (true, true) => [ESC, BRACKET, b'2', CURSOR_MODE_CMD],
         };
-
-        self.send_bytes(cmd, "cursor_mode_set");
+        self.send_bytes(&msg, "cursor_mode_set");
     }
 
     /// Clears the display and returns the cursor home.
@@ -152,31 +142,24 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn write_string_at_pos(&self, idx_row: u8, idx_col: u8, str_ln: &str) -> u8 {
-        let result = LCDS_ERR_SUCCESS;
-        
-        if (idx_row < 0 || idx_row > 2) {
-            bResult |= LCDS_ERR_ARG_ROW_RANGE
+        if idx_row > 2 || idx_row < 0 {
+            return LCDS_ERR_ARG_ROW_RANGE;
         }
-        if (idx_col < 0 || idx_col > 39) {
-            bResult |= LCDS_ERR_ARG_ROW_RANGE
+        if idx_col > 39 || idx_col < 0 {
+            return LCDS_ERR_ARG_COL_RANGE;
         }
-        if (result == LCDS_ERR_SUCCESS) {
-            let first_digit = idx_col % 10;
-            let second_digit = idx_col / 10;
-            let length = str_ln.len();
-            let length_to_print = str_ln.len() + idx_col;
-            let string_to_send = &[ESC, BRACKET, idx_row + b'0', b';', second_digit + b'0', CURSOR_POS_CMD];
-            
-            if (length_to_print > 40) {
-                length = 40 - idx_col;
-            }
-
-            self.send_bytes(string_to_send, "string to send");
-            let bytes_to_send = str_ln.chars().take(length).collect::<String>().as_bytes();
-            self.send_bytes(bytes_to_send, "bytes of string");
+        let first_digit = idx_col % 10;
+        let second_digit = idx_col / 10;
+        let mut length = str_ln.len();
+        let length_to_print = length + idx_col as usize;
+        if length_to_print > 40 {
+            length = 40 - idx_col as usize;
         }
-
-        return result
+        let string_to_send = [ESC, BRACKET, idx_row + b'0', b';', second_digit + b'0', first_digit + b'0', CURSOR_POS_CMD];
+        self.send_bytes(&string_to_send, "write_string_at_pos: set pos");
+        let bytes_to_send = str_ln.as_bytes();
+        self.send_bytes(&bytes_to_send[..length], "write_string_at_pos: data");
+        LCDS_ERR_SUCCESS
     }
 
     /// Scrolls the display left or right by a specified number of columns.
@@ -188,25 +171,20 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn display_scroll(&self, direction: bool, idx_col: u8) -> u8 {
-        let bresult = if (idx_col >= 0 && idx_col <= 39) {
-            let first_digit = idx_col % 10;
-            let second_digit = idx_col / 10;
-            let r_scroll = &[ESC, BRACKET, second_digit + b'0', first_digit + b'0', RSCROLL_CMD];
-            let l_scroll = &[ESC, BRACKET, second_digit + b'0', first_digit + b'0', LSCROLL_CMD];
-
-            self.display_mode(true);
-            if(direction) {
-                send_bytes(r_scroll, "right scroll")
-            } else {
-                send_bytes(l_scroll, "left scroll")
-            }
-
-            LCDS_ERR_SUCCESS
+        if idx_col < 0 || idx_col > 39 {
+            return LCDS_ERR_ARG_COL_RANGE;
+        }
+        let first_digit = idx_col % 10;
+        let second_digit = idx_col / 10;
+        let r_scroll = &[ESC, BRACKET, second_digit + b'0', first_digit + b'0', RSCROLL_CMD];
+        let l_scroll = &[ESC, BRACKET, second_digit + b'0', first_digit + b'0', LSCROLL_CMD];
+        self.display_mode(true);
+        if direction {
+            self.send_bytes(r_scroll, "right scroll");
         } else {
-            LCDS_ERR_ARG_COL_RANGE
-        };
-
-        return bresult;
+            self.send_bytes(l_scroll, "left scroll");
+        }
+        LCDS_ERR_SUCCESS
     }
 
     /// Saves the current cursor position.
@@ -244,15 +222,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn erase_in_line(&self, erase_param: u8) -> u8 {
-        let bresult = if (erase_param >= 0 && erase_param <= 2) {
-            let erase_mode = &[ESC, BRACKET, erase_param + b'0', ERASE_INLINE_CMD];
-            self.send_bytes(erase_mode, "erase mode");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_ERASE_OPTIONS
-        };
-
-        return bresult;
+        if erase_param < 0 || erase_param > 2 {
+            return LCDS_ERR_ARG_ERASE_OPTIONS;
+        }
+        let erase_mode = &[ESC, BRACKET, erase_param + b'0', ERASE_INLINE_CMD];
+        self.send_bytes(erase_mode, "erase mode");
+        LCDS_ERR_SUCCESS
     }
 
     /// Erases a number of characters starting at the current cursor position.
@@ -287,15 +262,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_br(&self, baud_rate: u8) -> u8 {
-        let bresult = if (baud_rate >= 0 && baud_rate <= 6) {
-            let save_br = &[ESC, BRACKET, baud_rate + b'0', BR_SAVE_CMD];
-            self.send_bytes(save_br, "saving baud rate");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_BR_RANGE
-        };
-
-        return bresult
+        if baud_rate < 0 || baud_rate > 6 {
+            return LCDS_ERR_ARG_BR_RANGE;
+        }
+        let save_br = &[ESC, BRACKET, baud_rate + b'0', BR_SAVE_CMD];
+        self.send_bytes(save_br, "saving baud rate");
+        LCDS_ERR_SUCCESS
     }
 
     /// Programs a character table into the LCD.
@@ -306,15 +278,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn chars_to_lcd(&self, char_table: u8) -> u8 {
-        let bresult = if (char_table >= 0 && char_table <= 3) {
-            let progr_table = &[ESC, BRACKET, char_table + b'0', PRG_CHAR_CMD];
-            self.send_bytes(progr_table, "programming char table");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_TABLE_RANGE
-        };
-
-        return bresult
+        if char_table < 0 || char_table > 3 {
+            return LCDS_ERR_ARG_TABLE_RANGE;
+        }
+        let progr_table = &[ESC, BRACKET, char_table + b'0', PRG_CHAR_CMD];
+        self.send_bytes(progr_table, "programming char table");
+        LCDS_ERR_SUCCESS
     }
 
     /// Saves a RAM character table to EEPROM.
@@ -325,14 +294,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_ram_to_eeprom(&self, char_table: u8) -> u8 {
-        let bresult = if (char_table >= 0 && char_table <= 3) {
-            let progr_table = &[ESC, BRACKET, char_table + b'0', SAVE_RAM_TO_EEPROM_CMD];
-            self.send_bytes(progr_table);
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_TABLE_RANGE  
-        };
-        return bresult
+        if char_table < 0 || char_table > 3 {
+            return LCDS_ERR_ARG_TABLE_RANGE;
+        }
+        let progr_table = &[ESC, BRACKET, char_table + b'0', SAVE_RAM_TO_EEPROM_CMD];
+        self.send_bytes(progr_table);
+        LCDS_ERR_SUCCESS
     }
 
     /// Loads a character table from EEPROM into RAM.
@@ -343,14 +310,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn ld_eeprom_to_ram(&self, char_table: u8) -> u8 {
-        let bresult = if (char_table >= 0 && char_table <= 3) {
-            let ld_table = &[ESC, BRACKET, char_table + b'0', LD_EEPROM_TO_RAM_CMD];
-            self.send_bytes(ld_table, "ld_eeprom_to_ram");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_TABLE_RANGE
-        };
-        return bresult;
+        if char_table < 0 || char_table > 3 {
+            return LCDS_ERR_ARG_TABLE_RANGE;
+        }
+        let ld_table = &[ESC, BRACKET, char_table + b'0', LD_EEPROM_TO_RAM_CMD];
+        self.send_bytes(ld_table, "ld_eeprom_to_ram");
+        LCDS_ERR_SUCCESS
     }
 
     /// Saves the communication mode to EEPROM.
@@ -361,15 +326,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_comm_to_eeprom(&self, comm_sel: u8) -> u8 {
-        // Valid comm_sel values are 0 (SPI), 1 (I2C), 2 (UART)
-        let bresult = if comm_sel <= 2 {
-            let cmd = &[ESC, BRACKET, comm_sel + b'0', COMM_MODE_SAVE_CMD];
-            self.send_bytes(cmd, "save_comm_to_eeprom");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_COMM_RANGE
-        };
-        bresult
+        if comm_sel > 2 {
+            return LCDS_ERR_ARG_COMM_RANGE;
+        }
+        let cmd = &[ESC, BRACKET, comm_sel + b'0', COMM_MODE_SAVE_CMD];
+        self.send_bytes(cmd, "save_comm_to_eeprom");
+        LCDS_ERR_SUCCESS
     }
 
     /// Enables the write operation to EEPROM.
@@ -386,14 +348,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_cursor_to_eeprom(&self, mode_crs: u8) -> u8 {
-        let bresult = if (mode_crs >= 0 && mode_crs <= 2) {
-            let cmd = &[ESC, BRACKET, mode_crs + b'0', CURSOR_MODE_SAVE_CMD];
-            self.send_bytes(cmd, "save_cursor_to_eeprom");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_CRS_RANGE
-        };
-        bresult
+        if mode_crs < 0 || mode_crs > 2 {
+            return LCDS_ERR_ARG_CRS_RANGE;
+        }
+        let cmd = &[ESC, BRACKET, mode_crs + b'0', CURSOR_MODE_SAVE_CMD];
+        self.send_bytes(cmd, "save_cursor_to_eeprom");
+        LCDS_ERR_SUCCESS
     }
 
     /// Saves the display mode into EEPROM.
@@ -404,14 +364,12 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_display_to_eeprom(&self, mode_disp: u8) -> u8 {
-        let bresult = if (mode_disp >= 0 && mode_disp <= 1) {
-            let cmd = &[ESC, BRACKET, mode_disp + b'0', DISP_MODE_SAVE_CMD];
-            self.send_bytes(cmd, "save_display_to_eeprom");
-            LCDS_ERR_SUCCESS
-        } else {
-            LCDS_ERR_ARG_DSP_RANGE
-        };
-        bresult
+        if mode_disp < 0 || mode_disp > 1 {
+            return LCDS_ERR_ARG_DSP_RANGE;
+        }
+        let cmd = &[ESC, BRACKET, mode_disp + b'0', DISP_MODE_SAVE_CMD];
+        self.send_bytes(cmd, "save_display_to_eeprom");
+        LCDS_ERR_SUCCESS
     }
 
     /// Defines a character in memory at a specified location.
@@ -423,22 +381,16 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn define_user_char(&self, str_user_def: &[u8], char_pos: u8) -> u8 {
-        // Argument validation: char_pos must be 0..=7, str_user_def must be 8 bytes
-        if char_pos > 7 || char_[pos < 0] {
+        if char_pos > 7 || char_pos < 0 {
             return LCDS_ERR_ARG_POS_RANGE;
         }
-        // Build the command buffer
         let mut cmd: Vec<u8> = Vec::with_capacity(MAX);
         cmd.push(ESC);
         cmd.push(BRACKET);
         cmd.push(0);
-
-        // Build the values to be sent for defining the custom character
         self.build_user_def_char(str_user_def, &mut cmd);
         cmd.push(char_pos + b'0');
         cmd.push(DEF_CHAR_CMD);
-
-        // Save the defined character in the RAM
         cmd.push(ESC);
         cmd.push(BRACKET);
         cmd.push(b'3');
@@ -458,21 +410,16 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn disp_user_char(&self, char_pos: &[u8], char_number: u8, idx_row: u8, idx_col: u8) -> u8 {
-        let mut bresult = LCDS_ERR_SUCCESS;
         if idx_row > 2 {
-            bresult |= LCDS_ERR_ARG_ROW_RANGE;
+            return LCDS_ERR_ARG_ROW_RANGE;
         }
         if idx_col > 39 {
-            bresult |= LCDS_ERR_ARG_COL_RANGE;
+            return LCDS_ERR_ARG_COL_RANGE;
         }
-        if bresult == LCDS_ERR_SUCCESS {
-            // Set the position of the cursor to the wanted line/column for displaying custom chars
-            self.set_pos(idx_row, idx_col);
-            // Send the position(s) of the character(s) to be displayed
-            let to_send = &char_pos[..(char_number as usize).min(char_pos.len())];
-            self.send_bytes(to_send, "disp_user_char");
-        }
-        bresult
+        self.set_pos(idx_row, idx_col);
+        let to_send = &char_pos[..(char_number as usize).min(char_pos.len())];
+        self.send_bytes(to_send, "disp_user_char");
+        LCDS_ERR_SUCCESS
     }
 
     /// Sets the position of the cursor.
@@ -484,20 +431,17 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn set_pos(&self, idx_row: u8, idx_col: u8) -> u8 {
-        let bresult = LCDS_ERR_SUCCESS;
-        if (idx_row < 0 || idx_row > 2) {
-            bresult |= LCDS_ERR_ARG_ROW_RANGE
+        if idx_row < 0 || idx_row > 2 {
+            return LCDS_ERR_ARG_ROW_RANGE;
         }
-        if (idx_col < 0 || idx_col > 39) {
-            bresult |= LCDS_ERR_ARG_COL_RANGE
+        if idx_col < 0 || idx_col > 39 {
+            return LCDS_ERR_ARG_COL_RANGE;
         }
-        if (bresult == LCDS_ERR_SUCCESS) {
-            let first_digit = idx_col % 10;
-            let second_digit = idx_col / 10;
-            let str_to_send = &[ESC, BRACKET, idx_row + b'0', ';', second_digit + b'0', first_digit + b'0', CURSOR_POS_CMD];
-            self.send_bytes(str_to_send, "set_pos")
-        }
-        bresult
+        let first_digit = idx_col % 10;
+        let second_digit = idx_col / 10;
+        let str_to_send = &[ESC, BRACKET, idx_row + b'0', ';', second_digit + b'0', first_digit + b'0', CURSOR_POS_CMD];
+        self.send_bytes(str_to_send, "set_pos");
+        LCDS_ERR_SUCCESS
     }
 
     /// Builds the array format to be sent to the LCD for a user-defined character.
