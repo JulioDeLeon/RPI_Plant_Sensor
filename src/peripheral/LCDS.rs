@@ -307,8 +307,8 @@ impl LCDS {
     /// * Error code indicating success or argument errors.
     pub fn chars_to_lcd(&self, char_table: u8) -> u8 {
         let bresult = if (char_table >= 0 && char_table <= 3) {
-            let prog_table = &[ESC, BRACKET, char_table + b'0', PRG_CHAR_CMD];
-            self.send_bytes(prog_table, "programming char table");
+            let progr_table = &[ESC, BRACKET, char_table + b'0', PRG_CHAR_CMD];
+            self.send_bytes(progr_table, "programming char table");
             LCDS_ERR_SUCCESS
         } else {
             LCDS_ERR_ARG_TABLE_RANGE
@@ -325,8 +325,14 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_ram_to_eeprom(&self, char_table: u8) -> u8 {
-        // Save a RAM character table to EEPROM
-        todo!("Implement save_ram_to_eeprom");
+        let bresult = if (char_table >= 0 && char_table <= 3) {
+            let progr_table = &[ESC, BRACKET, char_table + b'0', SAVE_RAM_TO_EEPROM_CMD];
+            self.send_bytes(progr_table);
+            LCDS_ERR_SUCCESS
+        } else {
+            LCDS_ERR_ARG_TABLE_RANGE  
+        };
+        return bresult
     }
 
     /// Loads a character table from EEPROM into RAM.
@@ -337,8 +343,14 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn ld_eeprom_to_ram(&self, char_table: u8) -> u8 {
-        // Load a character table from EEPROM into RAM
-        todo!("Implement ld_eeprom_to_ram");
+        let bresult = if (char_table >= 0 && char_table <= 3) {
+            let ld_table = &[ESC, BRACKET, char_table + b'0', LD_EEPROM_TO_RAM_CMD];
+            self.send_bytes(ld_table, "ld_eeprom_to_ram");
+            LCDS_ERR_SUCCESS
+        } else {
+            LCDS_ERR_ARG_TABLE_RANGE
+        };
+        return bresult;
     }
 
     /// Saves the communication mode to EEPROM.
@@ -349,51 +361,90 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_comm_to_eeprom(&self, comm_sel: u8) -> u8 {
-        // Save the communication mode to EEPROM
-        todo!("Implement save_comm_to_eeprom");
+        // Valid comm_sel values are 0 (SPI), 1 (I2C), 2 (UART)
+        let bresult = if comm_sel <= 2 {
+            let cmd = &[ESC, BRACKET, comm_sel + b'0', COMM_MODE_SAVE_CMD];
+            self.send_bytes(cmd, "save_comm_to_eeprom");
+            LCDS_ERR_SUCCESS
+        } else {
+            LCDS_ERR_ARG_COMM_RANGE
+        };
+        bresult
     }
 
     /// Enables the write operation to EEPROM.
     pub fn eeprom_wr_en(&self) {
-        // Enable write operation to EEPROM
-        todo!("Implement eeprom_wr_en");
+        let cmd = &[ESC, BRACKET, b'0', EEPROM_WR_EN_CMD];
+        self.send_bytes(cmd, "eeprom_wr_en");
     }
 
     /// Saves the cursor mode into EEPROM.
     ///
     /// # Arguments
-    /// * `mode_crs` - The cursor mode parameter.
+    /// * `mode_crs` - The cursor mode parameter (0: off, 1: on, 2: blink).
     ///
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_cursor_to_eeprom(&self, mode_crs: u8) -> u8 {
-        // Save the cursor mode into EEPROM
-        todo!("Implement save_cursor_to_eeprom");
+        let bresult = if (mode_crs >= 0 && mode_crs <= 2) {
+            let cmd = &[ESC, BRACKET, mode_crs + b'0', CURSOR_MODE_SAVE_CMD];
+            self.send_bytes(cmd, "save_cursor_to_eeprom");
+            LCDS_ERR_SUCCESS
+        } else {
+            LCDS_ERR_ARG_CRS_RANGE
+        };
+        bresult
     }
 
     /// Saves the display mode into EEPROM.
     ///
     /// # Arguments
-    /// * `mode_disp` - The display mode parameter.
+    /// * `mode_disp` - The display mode parameter (0: 16 chars, 1: 40 chars).
     ///
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn save_display_to_eeprom(&self, mode_disp: u8) -> u8 {
-        // Save the display mode into EEPROM
-        todo!("Implement save_display_to_eeprom");
+        let bresult = if (mode_disp >= 0 && mode_disp <= 1) {
+            let cmd = &[ESC, BRACKET, mode_disp + b'0', DISP_MODE_SAVE_CMD];
+            self.send_bytes(cmd, "save_display_to_eeprom");
+            LCDS_ERR_SUCCESS
+        } else {
+            LCDS_ERR_ARG_DSP_RANGE
+        };
+        bresult
     }
 
     /// Defines a character in memory at a specified location.
     ///
     /// # Arguments
-    /// * `str_user_def` - The user-defined character data.
-    /// * `char_pos` - The position in memory.
+    /// * `str_user_def` - The user-defined character data (8 bytes, one per row).
+    /// * `char_pos` - The position in memory (0-7).
     ///
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn define_user_char(&self, str_user_def: &[u8], char_pos: u8) -> u8 {
-        // Define a character in memory at a specified location
-        todo!("Implement define_user_char");
+        // Argument validation: char_pos must be 0..=7, str_user_def must be 8 bytes
+        if char_pos > 7 || char_[pos < 0] {
+            return LCDS_ERR_ARG_POS_RANGE;
+        }
+        // Build the command buffer
+        let mut cmd: Vec<u8> = Vec::with_capacity(MAX);
+        cmd.push(ESC);
+        cmd.push(BRACKET);
+        cmd.push(0);
+
+        // Build the values to be sent for defining the custom character
+        self.build_user_def_char(str_user_def, &mut cmd);
+        cmd.push(char_pos + b'0');
+        cmd.push(DEF_CHAR_CMD);
+
+        // Save the defined character in the RAM
+        cmd.push(ESC);
+        cmd.push(BRACKET);
+        cmd.push(b'3');
+        cmd.push(PRG_CHAR_CMD);
+        self.send_bytes(&cmd, "define_user_char");
+        LCDS_ERR_SUCCESS
     }
 
     /// Displays a user-defined character at the specified position.
@@ -407,8 +458,21 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn disp_user_char(&self, char_pos: &[u8], char_number: u8, idx_row: u8, idx_col: u8) -> u8 {
-        // Display a user defined character
-        todo!("Implement disp_user_char");
+        let mut bresult = LCDS_ERR_SUCCESS;
+        if idx_row > 2 {
+            bresult |= LCDS_ERR_ARG_ROW_RANGE;
+        }
+        if idx_col > 39 {
+            bresult |= LCDS_ERR_ARG_COL_RANGE;
+        }
+        if bresult == LCDS_ERR_SUCCESS {
+            // Set the position of the cursor to the wanted line/column for displaying custom chars
+            self.set_pos(idx_row, idx_col);
+            // Send the position(s) of the character(s) to be displayed
+            let to_send = &char_pos[..(char_number as usize).min(char_pos.len())];
+            self.send_bytes(to_send, "disp_user_char");
+        }
+        bresult
     }
 
     /// Sets the position of the cursor.
@@ -420,18 +484,34 @@ impl LCDS {
     /// # Returns
     /// * Error code indicating success or argument errors.
     pub fn set_pos(&self, idx_row: u8, idx_col: u8) -> u8 {
-        // Set the position of the cursor
-        todo!("Implement set_pos");
+        let bresult = LCDS_ERR_SUCCESS;
+        if (idx_row < 0 || idx_row > 2) {
+            bresult |= LCDS_ERR_ARG_ROW_RANGE
+        }
+        if (idx_col < 0 || idx_col > 39) {
+            bresult |= LCDS_ERR_ARG_COL_RANGE
+        }
+        if (bresult == LCDS_ERR_SUCCESS) {
+            let first_digit = idx_col % 10;
+            let second_digit = idx_col / 10;
+            let str_to_send = &[ESC, BRACKET, idx_row + b'0', ';', second_digit + b'0', first_digit + b'0', CURSOR_POS_CMD];
+            self.send_bytes(str_to_send, "set_pos")
+        }
+        bresult
     }
 
     /// Builds the array format to be sent to the LCD for a user-defined character.
     ///
     /// # Arguments
-    /// * `str_user_def` - The user-defined character data.
-    /// * `cmd_str` - The output command string buffer.
-    pub fn build_user_def_char(&self, str_user_def: &[u8], cmd_str: &mut [u8]) {
-        // Build the array format to be sent to the LCD
-        todo!("Implement build_user_def_char");
+    /// * `str_user_def` - The user-defined character data (8 bytes, one per row).
+    /// * `cmd_str` - The output command buffer (Vec<u8> or &mut Vec<u8> recommended).
+    pub fn build_user_def_char(&self, str_user_def: &[u8], cmd_str: &mut Vec<u8>) {
+        // Each byte is converted to a string like "0xNN;" and appended as ASCII bytes
+        for &val in str_user_def.iter().take(8) {
+            // Format as uppercase hex, always two digits
+            let hex = format!("0x{:02X};", val);
+            cmd_str.extend_from_slice(hex.as_bytes());
+        }
     }
 
 }
